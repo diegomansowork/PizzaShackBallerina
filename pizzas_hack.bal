@@ -5,17 +5,29 @@ import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
 
 public function main() {
-    io:println("Hello, World!");
+    io:println("Pizzas Hack inicializado con exito!");
 }
+
+type DatabaseConfig record{|
+    string host;
+    string user;
+    string password;
+    string database;
+    int port;
+|};
+
+configurable DatabaseConfig databaseConfig = ?;
 
 service /pizza on new http:Listener(9095) {
     
+
     private final mysql:Client db;
 
     function init() returns error? {
         // Initiate the mysql client at the start of the service. This will be used
         // throughout the lifetime of the service.
-        self.db = check new ("localhost", "pizzashackuser", "manage1234", "PizzaShack", 3306);
+        //self.db = check new ("localhost", "pizzashackuser", "manage1234", "PizzaShack", 3306);
+        self.db = check new(...databaseConfig);
     }
 
     resource function get menustest() returns MenuEntry[] {
@@ -52,6 +64,7 @@ service /pizza on new http:Listener(9095) {
             INSERT INTO Menu (name, description, price, icon)
             VALUES (${menu.name}, ${menu.description}, ${menu.price}, ${menu.icon});`);
             return menu;
+            //return http:CREATED;
         } else {
             return {
                 body: {
@@ -69,7 +82,6 @@ service /pizza on new http:Listener(9095) {
         return http:NO_CONTENT;
     }
     resource function post menutest(@http:Payload MenuEntry menu) returns MenuEntry|ConflictingMenuError {
-
         if menuTable.hasKey(menu.name) {
             return {
                 body: {
@@ -77,12 +89,9 @@ service /pizza on new http:Listener(9095) {
                 }
             };
         } else {
-
             menuTable.add(menu);
             return menu;
-
         }
-
     }
 
 
