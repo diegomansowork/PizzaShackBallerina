@@ -8,7 +8,7 @@ public function main() {
     io:println("Pizzas Hack inicializado con exito!");
 }
 
-type DatabaseConfig record{|
+type DatabaseConfig record {|
     string host;
     string user;
     string password;
@@ -19,32 +19,30 @@ type DatabaseConfig record{|
 configurable DatabaseConfig databaseConfig = ?;
 
 service /pizza on new http:Listener(9095) {
-    
 
     private final mysql:Client db;
 
     function init() returns error? {
         // Initiate the mysql client at the start of the service. This will be used
         // throughout the lifetime of the service.
-        //self.db = check new ("localhost", "pizzashackuser", "manage1234", "PizzaShack", 3306);
-        self.db = check new(...databaseConfig);
+        self.db = check new (...databaseConfig);
     }
 
-    resource function get menustest() returns MenuEntry[] {
+    resource function get menustest() returns MenuEntryTest[] {
         return menuTable.toArray();
     }
 
-    resource function get menus() returns MenuEntry[]|error {
-        
+    resource function get menu() returns MenuEntry[]|error {
+
         stream<MenuEntry, sql:Error?> menuStream = self.db->query(`SELECT * FROM Menu`);
 
         return from MenuEntry menu in menuStream
             select menu;
     }
 
-    resource function get menu/[string menuName]() returns MenuEntry|http:NotFound|error {
+    resource function get menu/[string menuId]() returns MenuEntry|http:NotFound|error {
         // Execute simple query to fetch record with requested id.
-        MenuEntry|sql:Error result = self.db->queryRow(`SELECT * FROM menu WHERE name = ${menuName}`);
+        MenuEntry|sql:Error result = self.db->queryRow(`SELECT * FROM menu WHERE menu_id = ${menuId}`);
 
         // Check if record is available or not
         if result is sql:NoRowsError {
@@ -54,8 +52,8 @@ service /pizza on new http:Listener(9095) {
         }
     }
 
-      resource function post menu(@http:Payload MenuEntry menu) returns MenuEntry|ConflictingMenuError|error {
-        
+    resource function post menu(@http:Payload MenuEntry menu) returns MenuEntry|ConflictingError|error {
+
         MenuEntry|sql:Error result = self.db->queryRow(`SELECT * FROM menu WHERE name = ${menu.name}`);
 
         // Check if record is available or not
@@ -73,16 +71,17 @@ service /pizza on new http:Listener(9095) {
             };
         }
 
-    }  
+    }
 
-    resource function delete menu/[string menuName]() returns http:NoContent|error {
+    resource function delete menu/[string menuId]() returns http:NoContent|error {
         // Execute simple query to fetch record with requested id.
 
-        _ = check self.db->execute(`DELETE FROM menu WHERE name = ${menuName}`);
+        _ = check self.db->execute(`DELETE FROM menu WHERE menu_id = ${menuId}`);
         return http:NO_CONTENT;
     }
-    resource function post menutest(@http:Payload MenuEntry menu) returns MenuEntry|ConflictingMenuError {
-        if menuTable.hasKey(menu.name) {
+
+    resource function post menutest(@http:Payload MenuEntryTest menu) returns MenuEntry|ConflictingError {
+        if menuTable.hasKey(menu.menuId) {
             return {
                 body: {
                     errmsg: string:'join(" ", "Conflicting Menu name:", menu.name)
@@ -94,20 +93,59 @@ service /pizza on new http:Listener(9095) {
         }
     }
 
+    resource function get 'order(boolean delivered = false) returns OrderEntry[]|error {
 
+        stream<OrderEntry, sql:Error?> orderStream = self.db->query(`SELECT * FROM ORDERS WHERE delivered = ${delivered}`);
 
-    resource function get delivery() returns json {
-
+        return from OrderEntry 'order in orderStream
+            select 'order;
     }
 
-    resource function put delivery/[string deliveryId]() {
+    resource function get 'order/[string orderId]() returns OrderEntry|http:NotFound|error {
+        // Execute simple query to fetch record with requested id.
+        OrderEntry|sql:Error result = self.db->queryRow(`SELECT * FROM ORDERS WHERE name = ${orderId}`);
 
+        // Check if record is available or not
+        if result is sql:NoRowsError {
+            return http:NOT_FOUND;
+        } else {
+            return result;
+        }
     }
-}
 
-public type ConflictingMenuError record {|
+    // resource function post menu(@http:Payload MenuEntry menu) returns MenuEntry|ConflictingMenuError|error {
+    resource function post 'order(@http:Payload OrderEntry 'order) returns OrderEntry|error {
+        _ = check self.db->execute(`
+        INSERT INTO ORDERS (ADDRESS,MENU_NAME,CLIENT_NAME,QUANTITY,CREDIT_CARD_NUMBER)
+        VALUES (${'order.address}, ${'order.menuName}, ${'order.clientName}, ${'order.quantity}, ${'order.creditCardNumber});`);
+        return 'order;
+    }
+
+    resource function post deliver_order/[string orderId]() returns http:NotFound|OutputMessage {
+        OrderEntry|sql:Error result = self.db->queryRow(`SELECT * FROM ORDERS WHERE name = ${orderId}`);
+
+        // Check if record is available or not
+        if result is sql:NoRowsError {
+            return http:NOT_FOUND;
+        } else {
+            return {
+                body: {
+                    errmsg: string:'join(" ", "Delivered! ID: ", orderId)
+                }
+            };
+        }
+    }
+
+} // main
+
+public type ConflictingError record {|
     *http:Conflict;
     ErrorMsg body;
+|};
+
+public type OutputMessage record {|
+    *http:Accepted;
+    string body;
 |};
 
 public type ErrorMsg record {|
@@ -115,17 +153,29 @@ public type ErrorMsg record {|
 |};
 
 public type MenuEntry record {
-	readonly string name;
-	string description;
-	string price;
-	string icon;	
+    @sql:Column {
+        name: "MENU_ID"
+    }
+    int menuId?;
+    string name;
+    string description;
+    string price;
+    string icon;
 };
 
-public final table<MenuEntry> key(name) menuTable = table [
+public type MenuEntryTest record {
+    readonly int menuId;
+    string name;
+    string description;
+    string price;
+    string icon;
+};
 
-    {name: "Menu 1", description: "Menu pizza carbonara", price: "30.13", icon: "xxxx"},
-    {name: "Menu 2", description: "Menu pizza barbacoa", price: "25.54", icon: "xxxx"},
-    {name: "Menu 3", description: "Menu pizza pepperoni", price: "28.43", icon: "xxxx"}
+public final table<MenuEntryTest> key(menuId) menuTable = table [
+
+    {menuId: 1, name: "Menu 1", description: "Menu pizza carbonara", price: "30.13", icon: "xxxx"},
+    {menuId: 2, name: "Menu 2", description: "Menu pizza barbacoa", price: "25.54", icon: "xxxx"},
+    {menuId: 3, name: "Menu 3", description: "Menu pizza pepperoni", price: "28.43", icon: "xxxx"}
 
 ];
 
@@ -145,18 +195,30 @@ public final table<PizzaEntry> key(name) pizzaTable = table [
 ];
 
 public type OrderEntry record {
-     string address;
-     string pizzaType;
-     string clientName;
-     int quantity;
-     string creditCardNumber;
-     boolean delivered;
-     readonly string orderId;
+    string address;
+    @sql:Column {
+        name: "MENU_NAME"
+    }
+    string menuName;
+    @sql:Column {
+        name: "client_name"
+    }
+    string clientName;
+    decimal quantity;
+    @sql:Column {
+        name: "credit_card_number"
+    }
+    string creditCardNumber;
+    boolean delivered?;
+    @sql:Column {
+        name: "order_id"
+    }
+    readonly string orderId?;
 };
 
-public final table<OrderEntry> key(orderId) oderTable = table [
+// public final table<OrderEntry> key(orderId) oderTable = table [
 
-    {address: "Paseo de la castellana 43, planta 2", pizzaType: "carbonara", clientName: "Diego Manso", quantity: 2, creditCardNumber: "i234i32u43", delivered: false, orderId: "1" },
-    {address: "Paseo de la castellana 43, planta 2", pizzaType: "barbacoa", clientName: "Juan", quantity: 5, creditCardNumber: "83475983475", delivered: false, orderId: "2" }
+//     {address: "Paseo de la castellana 43, planta 2", pizzaType: "carbonara", clientName: "Diego Manso", quantity: 2, creditCardNumber: "i234i32u43", delivered: false, orderId: "1"},
+//     {address: "Paseo de la castellana 43, planta 2", pizzaType: "barbacoa", clientName: "Juan", quantity: 5, creditCardNumber: "83475983475", delivered: false, orderId: "2"}
 
-];
+// ];
